@@ -73,7 +73,11 @@ func runAgentsResolve(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
-	currentBeadsDir := beads.ResolveBeadsDir(cwd)
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return err
+	}
+	currentBeadsDir := beads.ResolveBeadsDir(workDir)
 	if currentBeadsDir == "" {
 		return fmt.Errorf("not in a beads workspace")
 	}
@@ -107,6 +111,9 @@ func runAgentsResolve(cmd *cobra.Command, _ []string) error {
 			return NewSilentExit(1)
 		}
 		return fmt.Errorf("%s", message)
+	}
+	if rig != "" && agentBeadSourceIsTown(match.Source) && !agentsResolveJSON {
+		return fmt.Errorf("agent bead %s was found only in %s; patrol await/state commands require a rig-local agent bead", match.ID, match.Source)
 	}
 
 	if agentsResolveJSON {
@@ -166,18 +173,16 @@ func loadAgentBeadsFromDir(beadsDir string, issueSource, wispSource agentBeadSou
 		})
 	}
 
-	wisps, err := db.List(beads.ListOptions{Ephemeral: true, Label: "gt:agent", Status: "all"})
-	if err != nil {
-		return nil, fmt.Errorf("listing agent wisps in %s: %w", beadsDir, err)
-	}
-	for _, wisp := range wisps {
-		candidates = append(candidates, agentBeadCandidate{
-			ID:       wisp.ID,
-			Source:   wispSource,
-			BeadsDir: beadsDir,
-			Status:   wisp.Status,
-			Issue:    wisp,
-		})
+	if wisps, err := db.List(beads.ListOptions{Ephemeral: true, Label: "gt:agent", Status: "all"}); err == nil {
+		for _, wisp := range wisps {
+			candidates = append(candidates, agentBeadCandidate{
+				ID:       wisp.ID,
+				Source:   wispSource,
+				BeadsDir: beadsDir,
+				Status:   wisp.Status,
+				Issue:    wisp,
+			})
+		}
 	}
 
 	return candidates, nil
@@ -270,4 +275,8 @@ func agentBeadSourceRank(source agentBeadSource) int {
 	default:
 		return 99
 	}
+}
+
+func agentBeadSourceIsTown(source agentBeadSource) bool {
+	return source == agentSourceTownWisps || source == agentSourceTownIssues
 }

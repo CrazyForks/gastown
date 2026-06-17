@@ -99,7 +99,7 @@ This command:
 **On signal received** (activity detected):
 Reset the idle counter and start next patrol cycle:
 ```bash
-gt agent state "$YOUR_AGENT_BEAD" --set idle=0
+gt agents state "$YOUR_AGENT_BEAD" --set idle=0
 ```
 
 **On timeout** (no activity):

@@ -218,6 +218,10 @@ func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
 		"mol-witness-patrol.formula.toml",
 		"mol-refinery-patrol.formula.toml",
 	}
+	expectedResolver := map[string]string{
+		"mol-witness-patrol.formula.toml":  "YOUR_AGENT_BEAD=$(gt agents resolve --role witness --rig {{rig}})",
+		"mol-refinery-patrol.formula.toml": "YOUR_AGENT_BEAD=$(gt agents resolve --role refinery --rig {{rig}})",
+	}
 
 	for _, name := range patrolFormulas {
 		t.Run(name, func(t *testing.T) {
@@ -246,7 +250,7 @@ func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
 			// Must use dynamic resolution through the agent resolver. The older
 			// bd-list query only sees one table in one DB and misses wisp-backed
 			// or town-stranded agent beads.
-			if !strings.Contains(loopDesc, "YOUR_AGENT_BEAD=$(gt agents resolve") {
+			if !strings.Contains(loopDesc, expectedResolver[name]) {
 				t.Errorf("%s loop step missing dynamic agent bead resolution via gt agents resolve.\n"+
 					"Agent bead IDs must be resolved at runtime, not hardcoded.\n"+
 					"See hq-9xs.",
@@ -255,7 +259,7 @@ func TestPatrolFormulasUseDynamicBeadResolution(t *testing.T) {
 			if !strings.Contains(loopDesc, `--agent-bead "$YOUR_AGENT_BEAD"`) {
 				t.Errorf("%s loop step must pass the resolved agent bead to await", name)
 			}
-			if !strings.Contains(loopDesc, `gt agent state "$YOUR_AGENT_BEAD" --set idle=0`) {
+			if !strings.Contains(loopDesc, `gt agents state "$YOUR_AGENT_BEAD" --set idle=0`) {
 				t.Errorf("%s loop step must reset state on the resolved agent bead", name)
 			}
 			if strings.Contains(loopDesc, "bd list --label=gt:agent") {

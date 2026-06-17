@@ -1121,11 +1121,11 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Resolve your agent bead ID for this patrol cycle. You MUST replace `<YOUR_RIG>` below with your actual rig name (e.g., `beads`, `town`) before running:
+Resolve your agent bead ID for this patrol cycle:
 ```bash
-YOUR_AGENT_BEAD=$(gt agents resolve --role refinery --rig <YOUR_RIG>)
+YOUR_AGENT_BEAD=$(gt agents resolve --role refinery --rig {{rig}})
 ```
-This must resolve exactly one bead ID. If it fails, STOP and report the error — verify you substituted `<YOUR_RIG>` correctly. If it reports multiple results, STOP and report the ambiguity — manual disambiguation is required. Use the resolved `YOUR_AGENT_BEAD` in the commands below.
+This must resolve exactly one bead ID. If it fails, STOP and report the error. If it reports multiple results, STOP and report the ambiguity — manual disambiguation is required. Use the resolved `YOUR_AGENT_BEAD` in the commands below.
 
 Then use await-event to subscribe to the refinery event channel with exponential backoff:
 
@@ -1156,7 +1156,7 @@ This command:
 **On event received** (refinery-specific activity):
 Reset the idle counter and start next patrol cycle:
 ```bash
-gt agent state "$YOUR_AGENT_BEAD" --set idle=0
+gt agents state "$YOUR_AGENT_BEAD" --set idle=0
 ```
 
 **On timeout** (no events):

@@ -35,6 +35,15 @@ func TestAgentBeadMatchesDescriptionAndIDFallback(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "collapsed prefix-rig ID fallback matches sparse metadata",
+			issue: &beads.Issue{
+				ID: "cp-refinery",
+			},
+			role: "refinery",
+			rig:  "cp",
+			want: true,
+		},
+		{
 			name: "role mismatch",
 			issue: &beads.Issue{
 				ID:          "gt-gastown-witness",
