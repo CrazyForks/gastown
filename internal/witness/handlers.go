@@ -917,6 +917,9 @@ func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 	}
 	if result, err := runSchedulerForSlotOpen(townRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "witness: SLOT_OPEN scheduler trigger failed for %s/%s: %v\n", rigName, polecatName, err)
+		if result.Dispatched > 0 {
+			return
+		}
 	} else if result.Dispatched > 0 {
 		if status, ok := schedulerOpenAfterSlot(result); ok {
 			notifyMayorSchedulerOpen(townRoot, rigName, polecatName, exitType, status)
