@@ -302,7 +302,10 @@ func TestBdSubprocessEnv_DoesNotMutateBaseEnv(t *testing.T) {
 }
 
 func TestBdSubprocessEnv_FiltersStaleBdTargetEnv(t *testing.T) {
-	beadsDir := t.TempDir()
+	beadsDir := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	metadata := []byte(`{"dolt_database":"rigdb"}`)
 	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), metadata, 0644); err != nil {
 		t.Fatal(err)
