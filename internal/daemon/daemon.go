@@ -300,18 +300,11 @@ func New(config *Config) (*Daemon, error) {
 	if patrolConfig != nil && patrolConfig.Patrols != nil && patrolConfig.Patrols.DoltServer != nil {
 		doltServer = NewDoltServerManager(config.TownRoot, patrolConfig.Patrols.DoltServer, logger.Printf)
 		if doltServer.IsEnabled() {
-			logger.Printf("Dolt server management enabled (port %d)", patrolConfig.Patrols.DoltServer.Port)
+			logger.Printf("Dolt server management enabled (port %d)", doltServer.config.Port)
 			// Propagate Dolt connection info to process env so AgentEnv() passes it to
 			// all spawned agent sessions. Without this, bd in agent sessions
 			// auto-starts rogue Dolt instances or connects to localhost. (GH#2412)
-			portStr := strconv.Itoa(patrolConfig.Patrols.DoltServer.Port)
-			os.Setenv("GT_DOLT_PORT", portStr)
-			os.Setenv("BEADS_DOLT_SERVER_PORT", portStr)
-			os.Setenv("BEADS_DOLT_PORT", portStr)
-			if patrolConfig.Patrols.DoltServer.Host != "" {
-				os.Setenv("GT_DOLT_HOST", patrolConfig.Patrols.DoltServer.Host)
-				os.Setenv("BEADS_DOLT_SERVER_HOST", patrolConfig.Patrols.DoltServer.Host)
-			}
+			applyDoltServerConfigEnv(doltServer.config)
 		}
 	}
 
@@ -336,13 +329,7 @@ func New(config *Config) (*Daemon, error) {
 	// when the server runs on a remote machine. BEADS_DOLT_SERVER_HOST is a
 	// derived alias, not an authority, so stale inherited values are replaced or
 	// removed here.
-	if host := agentconfig.ResolveConfiguredDoltHost(config.TownRoot); host != "" {
-		os.Setenv("GT_DOLT_HOST", host)
-		os.Setenv("BEADS_DOLT_SERVER_HOST", host)
-		logger.Printf("Set BEADS_DOLT_SERVER_HOST=%s from resolved Dolt host", host)
-	} else {
-		os.Unsetenv("BEADS_DOLT_SERVER_HOST")
-	}
+	applyConfiguredDoltHostEnv(config.TownRoot, logger.Printf)
 
 	// PATCH-006: Resolve binary paths at startup.
 	gtPath, err := exec.LookPath("gt")
@@ -410,6 +397,37 @@ func New(config *Config) (*Daemon, error) {
 		rigPool:         newRigWorkerPool(0, 0, logger), // defaults: 10 workers, 30s timeout
 	}
 	return d, nil
+}
+
+func applyDoltServerConfigEnv(config *DoltServerConfig) {
+	if config == nil {
+		return
+	}
+	if config.Port > 0 {
+		portStr := strconv.Itoa(config.Port)
+		os.Setenv("GT_DOLT_PORT", portStr)
+		os.Setenv("BEADS_DOLT_SERVER_PORT", portStr)
+		os.Setenv("BEADS_DOLT_PORT", portStr)
+	}
+	if config.Host != "" {
+		os.Setenv("GT_DOLT_HOST", config.Host)
+		os.Setenv("BEADS_DOLT_SERVER_HOST", config.Host)
+	}
+}
+
+func applyConfiguredDoltHostEnv(townRoot string, logf func(format string, v ...interface{})) {
+	if host := agentconfig.ResolveConfiguredDoltHost(townRoot); host != "" {
+		os.Setenv("GT_DOLT_HOST", host)
+		os.Setenv("BEADS_DOLT_SERVER_HOST", host)
+		if logf != nil {
+			logf("Set BEADS_DOLT_SERVER_HOST=%s from resolved Dolt host", host)
+		}
+		return
+	}
+	if _, _, ok := agentconfig.ManagedDoltEndpoint(townRoot); ok {
+		os.Unsetenv("GT_DOLT_HOST")
+	}
+	os.Unsetenv("BEADS_DOLT_SERVER_HOST")
 }
 
 func (d *Daemon) cleanupLegacySocketSessions() {
