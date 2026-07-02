@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	agentconfig "github.com/steveyegge/gastown/internal/config"
 )
 
 var envKeysCaseInsensitive = runtime.GOOS == "windows"
@@ -16,6 +18,7 @@ var bdTargetEnvKeys = []string{
 	"BEADS_DB",
 	"BD_DB",
 	"BEADS_SHARED_SERVER_DIR",
+	"GT_DOLT_DATA",
 }
 
 // DatabaseNameFromMetadata reads the dolt_database field from .beads/metadata.json.
@@ -83,7 +86,7 @@ func isBDTargetEnv(entry string) bool {
 func BuildPinnedBDEnv(base []string, beadsDir string) []string {
 	env := SuppressBDSideEffects(StripBDTargetEnv(base))
 	if beadsDir == "" {
-		return addGTDerivedDoltConnectionEnv(env)
+		return addResolvedDoltConnectionEnv(env, "")
 	}
 	beadsDir = canonicalBeadsDir(beadsDir)
 	env = append(env, "BEADS_DIR="+beadsDir)
@@ -91,7 +94,7 @@ func BuildPinnedBDEnv(base []string, beadsDir string) []string {
 	if dbEnv := DatabaseEnv(beadsDir); dbEnv != "" {
 		env = append(env, dbEnv)
 	}
-	return addGTDerivedDoltConnectionEnv(env)
+	return addResolvedDoltConnectionEnv(env, beadsDir)
 }
 
 // BuildRoutingBDEnv returns env for a bd subprocess that intentionally relies on
@@ -101,7 +104,7 @@ func BuildRoutingBDEnv(base []string, fallbackBeadsDir string) []string {
 	env := SuppressBDSideEffects(StripBDTargetEnv(base))
 	fallbackBeadsDir = canonicalBeadsDir(fallbackBeadsDir)
 	env = append(env, doltTargetEnvFromBeadsDir(fallbackBeadsDir)...)
-	return addGTDerivedDoltConnectionEnv(env)
+	return addResolvedDoltConnectionEnv(env, fallbackBeadsDir)
 }
 
 // BuildReadOnlyPinnedBDEnv returns env for a read-only bd subprocess pinned to
@@ -341,31 +344,58 @@ func envKeyHasPrefix(keyName, prefix string) bool {
 	return strings.HasPrefix(keyName, prefix)
 }
 
-func addGTDerivedDoltConnectionEnv(env []string) []string {
+func addResolvedDoltConnectionEnv(env []string, beadsDir string) []string {
 	gtHost := envValue(env, "GT_DOLT_HOST")
 	gtPort := envValue(env, "GT_DOLT_PORT")
 	// GT_DOLT_DATA is intentionally not translated to BEADS_DOLT_DATA_DIR here:
 	// data-dir env selects direct-mode storage and can override metadata routing.
-	if gtHost != "" && envValue(env, "BEADS_DOLT_SERVER_HOST") == "" {
+	if gtHost != "" {
+		env = StripEnvKey(env, "BEADS_DOLT_SERVER_HOST")
 		env = append(env, "BEADS_DOLT_SERVER_HOST="+gtHost)
 	}
 	if gtPort != "" {
-		if envValue(env, "BEADS_DOLT_SERVER_PORT") == "" {
-			env = append(env, "BEADS_DOLT_SERVER_PORT="+gtPort)
+		env = StripEnvKey(env, "BEADS_DOLT_SERVER_PORT")
+		env = StripEnvKey(env, "BEADS_DOLT_PORT")
+		env = append(env, "BEADS_DOLT_SERVER_PORT="+gtPort, "BEADS_DOLT_PORT="+gtPort)
+	}
+	if beadsDir == "" {
+		return env
+	}
+	townRoot := FindTownRoot(filepath.Dir(beadsDir))
+	if townRoot == "" {
+		return env
+	}
+	managedHost, managedPort, hasManagedConfig := agentconfig.ManagedDoltEndpoint(townRoot)
+	if envValue(env, "BEADS_DOLT_SERVER_HOST") == "" {
+		if hasManagedConfig {
+			if managedHost != "" {
+				env = append(env, "BEADS_DOLT_SERVER_HOST="+managedHost)
+			}
+		} else if host := agentconfig.ResolveDoltHost(townRoot); host != "" {
+			env = append(env, "BEADS_DOLT_SERVER_HOST="+host)
 		}
-		if envValue(env, "BEADS_DOLT_PORT") == "" {
-			env = append(env, "BEADS_DOLT_PORT="+gtPort)
+	}
+	if envValue(env, "BEADS_DOLT_SERVER_PORT") == "" && envValue(env, "BEADS_DOLT_PORT") == "" {
+		if hasManagedConfig {
+			if managedPort > 0 {
+				portStr := strconv.Itoa(managedPort)
+				env = append(env, "BEADS_DOLT_SERVER_PORT="+portStr, "BEADS_DOLT_PORT="+portStr)
+			}
+		} else if port := agentconfig.ResolveDoltPort(townRoot); port > 0 {
+			portStr := strconv.Itoa(port)
+			env = append(env, "BEADS_DOLT_SERVER_PORT="+portStr, "BEADS_DOLT_PORT="+portStr)
 		}
 	}
 	return env
 }
 
 func envValue(env []string, key string) string {
+	var value string
 	for _, entry := range env {
-		keyName, value, ok := strings.Cut(entry, "=")
+		keyName, v, ok := strings.Cut(entry, "=")
 		if ok && envKeyMatches(keyName, key) {
-			return value
+			value = v
 		}
 	}
-	return ""
+	return value
 }

@@ -319,7 +319,7 @@ for arg in "$@"; do
   esac
   log_args="${log_args}${log_args:+ }${arg}"
 done
-printf '%s|%s|%s|%s|%s|%s|%s\n' "$(pwd)" "${BEADS_DIR:-}" "${BEADS_DOLT_SERVER_DATABASE:-}" "${BEADS_DB:-}" "${BD_DB:-}" "${BEADS_DOLT_DATA_DIR:-}" "$log_args" >> "${BD_LOG}"
+printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$(pwd)" "${BEADS_DIR:-}" "${BEADS_DOLT_SERVER_DATABASE:-}" "${BEADS_DB:-}" "${BD_DB:-}" "${BEADS_DOLT_DATA_DIR:-}" "${GT_DOLT_DATA:-}" "$log_args" >> "${BD_LOG}"
 cmd="$1"
 shift || true
 while [ "$cmd" = "--db" ] || [ "$cmd" = "--allow-stale" ]; do
@@ -365,7 +365,7 @@ exit 0
 `
 	bdScriptWindows := `@echo off
 setlocal enableextensions
-echo %CD%^|%BEADS_DIR%^|%BEADS_DOLT_SERVER_DATABASE%^|%BEADS_DB%^|%BD_DB%^|%BEADS_DOLT_DATA_DIR%^|%*>>"%BD_LOG%"
+echo %CD%^|%BEADS_DIR%^|%BEADS_DOLT_SERVER_DATABASE%^|%BEADS_DB%^|%BD_DB%^|%BEADS_DOLT_DATA_DIR%^|%GT_DOLT_DATA%^|%*>>"%BD_LOG%"
 set "cmd=%1"
 set "sub=%2"
 if "%cmd%"=="--allow-stale" (
@@ -387,11 +387,11 @@ if "%cmd%"=="formula" (
 if "%cmd%"=="cook" exit /b 0
 if "%cmd%"=="mol" (
   if "%sub%"=="wisp" (
-    echo {"new_epic_id":"gt-wisp-xyz"}
-    exit /b 0
+    echo legacy mol wisp should not be called 1>&2
+    exit /b 1
   )
   if "%sub%"=="bond" (
-    echo {"root_id":"gt-wisp-xyz"}
+    echo {"result_id":"gt-abc123","id_mapping":{"mol-polecat-work":"gt-wisp-xyz"}}
     exit /b 0
   )
 )
@@ -459,6 +459,7 @@ exit /b 0
 	t.Setenv("BEADS_DB", filepath.Join(townRoot, "wrong.db"))
 	t.Setenv("BD_DB", filepath.Join(townRoot, "wrong.bd"))
 	t.Setenv("BEADS_DOLT_DATA_DIR", filepath.Join(townRoot, "wrong-data"))
+	t.Setenv("GT_DOLT_DATA", filepath.Join(townRoot, "wrong-gt-data"))
 
 	createOut, err := BdCmd("create", "--json", "--title=New sling smoke", "--type=task").
 		Dir(rigDir).
@@ -512,7 +513,7 @@ exit /b 0
 	gotHook := false
 	gotMetadata := false
 	gotReviewOnlyMetadata := false
-	assertTargetRig := func(kind, dir, beadsDir, database, beadsDB, bdDB, dataDir, args string) {
+	assertTargetRig := func(kind, dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args string) {
 		t.Helper()
 		if dir != wantDir {
 			t.Fatalf("bd %s ran in %q, want %q (args: %q)", kind, dir, wantDir, args)
@@ -526,13 +527,16 @@ exit /b 0
 		if beadsDB != "" || bdDB != "" || dataDir != "" {
 			t.Fatalf("bd %s leaked stale DB env BEADS_DB=%q BD_DB=%q BEADS_DOLT_DATA_DIR=%q (args: %q)", kind, beadsDB, bdDB, dataDir, args)
 		}
+		if gtData != "" {
+			t.Fatalf("bd %s leaked GT_DOLT_DATA=%q (args: %q)", kind, gtData, args)
+		}
 	}
 
 	firstReviewOnlyMetadataIndex := -1
 	lastHookIndex := -1
 	for i, line := range logLines {
-		parts := strings.SplitN(line, "|", 7)
-		if len(parts) != 7 {
+		parts := strings.SplitN(line, "|", 8)
+		if len(parts) != 8 {
 			t.Fatalf("malformed bd log line: %q", line)
 		}
 		dir := parts[0]
@@ -547,20 +551,21 @@ exit /b 0
 		beadsDB := parts[3]
 		bdDB := parts[4]
 		dataDir := parts[5]
-		args := parts[6]
+		gtData := parts[6]
+		args := parts[7]
 
 		switch {
 		case strings.Contains(args, "create "):
 			gotCreate = true
-			assertTargetRig("create", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("create", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "show "+newBeadID) && strings.Contains(args, "--json"):
 			gotTargetDBCheck = true
-			assertTargetRig("target DB check", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("target DB check", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "sql SELECT DISTINCT wisp_dependencies.issue_id"):
-			assertTargetRig("molecule dep check", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("molecule dep check", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "formula show "):
 			gotFormulaShow = true
-			assertTargetRig("formula show", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("formula show", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "cook "):
 			switch {
 			case strings.Contains(args, "mol-polecat-work"):
@@ -570,28 +575,28 @@ exit /b 0
 			default:
 				t.Fatalf("bd cook args = %q, want expected formula", args)
 			}
-			assertTargetRig("cook", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("cook", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "mol bond "):
 			gotBondCount++
 			if !strings.Contains(args, "--ephemeral") {
 				t.Fatalf("bd mol bond args = %q, want --ephemeral", args)
 			}
-			assertTargetRig("mol bond", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("mol bond", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "update "+newBeadID) && strings.Contains(args, "--status=hooked"):
 			gotHook = true
 			lastHookIndex = i
-			assertTargetRig("hook update", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("hook update", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "update "+newBeadID) && strings.Contains(args, "--description=<attached-molecule-and-formula-fields>"):
 			gotMetadata = true
-			assertTargetRig("metadata update", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("metadata update", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "update "+newBeadID) && strings.Contains(args, "--description=<review-only-fields>"):
 			gotReviewOnlyMetadata = true
 			if firstReviewOnlyMetadataIndex == -1 {
 				firstReviewOnlyMetadataIndex = i
 			}
-			assertTargetRig("review-only metadata update", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("review-only metadata update", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case strings.Contains(args, "update "+newBeadID) && strings.Contains(args, "--description="):
-			assertTargetRig("description update", dir, beadsDir, database, beadsDB, bdDB, dataDir, args)
+			assertTargetRig("description update", dir, beadsDir, database, beadsDB, bdDB, dataDir, gtData, args)
 		case args == "--version" || strings.HasPrefix(args, "version") || strings.Contains(args, " version") || strings.Contains(args, "show gt-rig-") || strings.Contains(args, "show mol-"):
 			// Explicitly exempt non-target-bead lookups; every gt-new123 operation
 			// above must still prove it is pinned to the gastown database.
