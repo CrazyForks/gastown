@@ -624,6 +624,9 @@ func normalizeHookShowTarget(target string) string {
 	if target == "" {
 		return target
 	}
+	if target == "." || target == ".." || (strings.ContainsAny(target, `/\\`) && !safeAgentTargetPath(target)) {
+		return target
+	}
 
 	// Use the same role/path resolver as dispatching commands, then convert
 	// the resulting tmux session back to a canonical assignee address.
