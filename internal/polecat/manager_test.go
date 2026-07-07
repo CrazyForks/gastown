@@ -23,6 +23,78 @@ import (
 	"github.com/steveyegge/gastown/internal/tmux"
 )
 
+func TestHasSubmittableWorkForWorkstateUsesBranchTargetStatus(t *testing.T) {
+	repo := setupManagerSquashPreservedRepo(t)
+	if got := hasSubmittableWorkForWorkstate(repo, []string{"integration/test"}); got {
+		t.Fatal("squash-preserved branch should not require MQ submission through manager workstate helper")
+	}
+
+	managerWriteFile(t, filepath.Join(repo, "feature.txt"), "one\ntwo\nthree\n")
+	runManagerGit(t, repo, "add", "feature.txt")
+	runManagerGit(t, repo, "commit", "-m", "extra local work")
+	if got := hasSubmittableWorkForWorkstate(repo, []string{"integration/test"}); !got {
+		t.Fatal("new local work after squash preservation should still require MQ submission")
+	}
+}
+
+func setupManagerSquashPreservedRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	repo := filepath.Join(root, "repo")
+	runManagerGit(t, root, "init", "--bare", remote)
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runManagerGit(t, repo, "init")
+	runManagerGit(t, repo, "config", "user.email", "test@example.com")
+	runManagerGit(t, repo, "config", "user.name", "Test User")
+	managerWriteFile(t, filepath.Join(repo, "README.md"), "base\n")
+	runManagerGit(t, repo, "add", "README.md")
+	runManagerGit(t, repo, "commit", "-m", "base")
+	runManagerGit(t, repo, "branch", "-M", "main")
+	runManagerGit(t, repo, "remote", "add", "origin", remote)
+	runManagerGit(t, repo, "push", "-u", "origin", "main")
+	runManagerGit(t, repo, "switch", "-c", "integration/test")
+	runManagerGit(t, repo, "push", "-u", "origin", "integration/test")
+	if err := exec.Command("git", "-C", repo, "merge-tree", "--write-tree", "HEAD", "HEAD").Run(); err != nil {
+		t.Skipf("git merge-tree --write-tree unsupported: %v", err)
+	}
+
+	runManagerGit(t, repo, "switch", "-c", "polecat/squash")
+	managerWriteFile(t, filepath.Join(repo, "feature.txt"), "one\n")
+	runManagerGit(t, repo, "add", "feature.txt")
+	runManagerGit(t, repo, "commit", "-m", "checkpoint one")
+	managerWriteFile(t, filepath.Join(repo, "feature.txt"), "one\ntwo\n")
+	runManagerGit(t, repo, "add", "feature.txt")
+	runManagerGit(t, repo, "commit", "-m", "checkpoint two")
+	runManagerGit(t, repo, "switch", "integration/test")
+	runManagerGit(t, repo, "merge", "--squash", "polecat/squash")
+	runManagerGit(t, repo, "commit", "-m", "squash polecat work")
+	managerWriteFile(t, filepath.Join(repo, "target.txt"), "target advanced\n")
+	runManagerGit(t, repo, "add", "target.txt")
+	runManagerGit(t, repo, "commit", "-m", "advance target")
+	runManagerGit(t, repo, "push", "origin", "integration/test")
+	runManagerGit(t, repo, "switch", "polecat/squash")
+	return repo
+}
+
+func managerWriteFile(t *testing.T, path, data string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runManagerGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
 // installMockBd places a fake bd binary in PATH that handles the commands
 // needed by AddWithOptions (init, create, show, config, update, slot, etc.).
 // This allows polecat tests to run without a real bd installation.
